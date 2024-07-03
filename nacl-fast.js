@@ -2040,6 +2040,40 @@ function unpackneg(r, p) {
   return 0;
 }
 
+// Note: difference from C - smlen returned, not passed as argument.
+function crypto_sign_raw(sm, m, n, sk) {
+  var d = new Uint8Array(64), h = new Uint8Array(64), r = new Uint8Array(64);
+  var i, j, x = new Float64Array(64);
+  var p = [gf(), gf(), gf(), gf()];
+
+  randombytes(d.subarray(32), 32);
+  for (i = 0; i < 32; i++) d[i] = sk[i];
+
+  var smlen = n + 64;
+  for (i = 0; i < n; i++) sm[64 + i] = m[i];
+  for (i = 0; i < 32; i++) sm[32 + i] = d[32 + i];
+
+  crypto_hash(r, sm.subarray(32), n+32);
+  reduce(r);
+  scalarbase(p, r);
+  pack(sm, p);
+
+  for (i = 32; i < 64; i++) sm[i] = sk[i];
+  crypto_hash(h, sm, n + 64);
+  reduce(h);
+
+  for (i = 0; i < 64; i++) x[i] = 0;
+  for (i = 0; i < 32; i++) x[i] = r[i];
+  for (i = 0; i < 32; i++) {
+    for (j = 0; j < 32; j++) {
+      x[i+j] += h[i] * d[j];
+    }
+  }
+
+  modL(sm.subarray(32), x);
+  return smlen;
+}
+
 function crypto_sign_open(m, sm, n, pk) {
   var i;
   var t = new Uint8Array(32), h = new Uint8Array(64);
@@ -2274,6 +2308,15 @@ nacl.sign = function(msg, secretKey) {
   return signedMsg;
 };
 
+nacl.signRaw = function(msg, secretKey) {
+  checkArrayTypes(msg, secretKey);
+  if (secretKey.length !== crypto_sign_SECRETKEYBYTES)
+    throw new Error('bad secret key size');
+  var signedMsg = new Uint8Array(crypto_sign_BYTES+msg.length);
+  crypto_sign_raw(signedMsg, msg, msg.length, secretKey);
+  return signedMsg;
+};
+
 nacl.sign.open = function(signedMsg, publicKey) {
   checkArrayTypes(signedMsg, publicKey);
   if (publicKey.length !== crypto_sign_PUBLICKEYBYTES)
@@ -2288,6 +2331,13 @@ nacl.sign.open = function(signedMsg, publicKey) {
 
 nacl.sign.detached = function(msg, secretKey) {
   var signedMsg = nacl.sign(msg, secretKey);
+  var sig = new Uint8Array(crypto_sign_BYTES);
+  for (var i = 0; i < sig.length; i++) sig[i] = signedMsg[i];
+  return sig;
+};
+
+nacl.signRaw.detached = function(msg, secretKey) {
+  var signedMsg = nacl.signRaw(msg, secretKey);
   var sig = new Uint8Array(crypto_sign_BYTES);
   for (var i = 0; i < sig.length; i++) sig[i] = signedMsg[i];
   return sig;
